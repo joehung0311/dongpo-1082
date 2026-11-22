@@ -8,7 +8,7 @@
 
 ## 線上遊玩
 
-GitHub Pages：（發布後填入）
+GitHub Pages：<https://joehung0311.github.io/dongpo-1082/>
 
 ## 功能
 

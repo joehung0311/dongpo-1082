@@ -107,9 +107,15 @@
   let skipWait = null;
 
   function scrollDown() {
-    logEl.scrollTop = logEl.scrollHeight;
+    const go = () => {
+      const last = logEl.lastElementChild;
+      // 最新訊息比對話區還高時，捲到它的開頭，讓玩家從第一個字讀起
+      if (last && last.offsetHeight > logEl.clientHeight - 12) logEl.scrollTop = last.offsetTop - 8;
+      else logEl.scrollTop = logEl.scrollHeight;
+    };
+    go();
     // 版面在下一格才定案（例如鍵盤彈出、選項出現），再捲一次確保最新訊息可見
-    requestAnimationFrame(() => { logEl.scrollTop = logEl.scrollHeight; });
+    requestAnimationFrame(go);
   }
 
   function renderMsg(m) {
@@ -195,6 +201,13 @@
   // 「問問東坡」正在回答時，主線劇情先等一下，避免問答被劇情訊息插隊
   async function waitAsks() {
     while (askPending > 0) await askChain;
+    // 東坡剛回答完時，留一點閱讀時間再繼續主線，避免回覆立刻被劇情訊息擠出畫面
+    let left = readUntil - Date.now();
+    while (left > 0) {
+      await new Promise((r) => setTimeout(r, left));
+      if (askPending > 0) { await waitAsks(); return; }
+      left = readUntil - Date.now();
+    }
   }
 
   async function play(list, token) {
@@ -391,6 +404,7 @@
   let askGen = 0;
   let askTypingEl = null;
   let lastFallback = -1;
+  let readUntil = 0; // 主線劇情在此時間之前先暫停，讓玩家讀完東坡的回覆
 
   function showAskTyping() {
     hideAskTyping();
@@ -404,7 +418,7 @@
     scrollDown();
   }
   function hideAskTyping() { if (askTypingEl) { askTypingEl.remove(); askTypingEl = null; } }
-  function cancelAsks() { askGen++; hideAskTyping(); }
+  function cancelAsks() { askGen++; readUntil = 0; hideAskTyping(); }
 
   function replyFor(text) {
     const hit = findKeyword(text);
@@ -436,11 +450,13 @@
     hideAskTyping();
     if (gen !== askGen) return;
     addMsg(m, true);
+    readUntil = Date.now() + Math.min(4000, 1200 + m.t.length * 30) * S.speed;
   }
 
   function ask(text) {
     text = String(text || "").trim();
     if (!text) return false;
+    hideGuide(); // 會用問問東坡了，玩法提示就不必再佔空間
     const gen = askGen;
     askPending++;
     askChain = askChain
@@ -473,6 +489,10 @@
   $("#btnSuggest").onclick = () => {
     const open = $("#suggest").hidden;
     $("#suggest").hidden = !open;
+    // 推薦列打開時暫代下方工具列的位置，避免小螢幕上把輸入框擠出畫面
+    document.body.classList.toggle("sugg", open);
+    if (open) hideGuide();
+    scrollDown();
     $("#btnSuggest").setAttribute("aria-expanded", String(open));
     $("#btnSuggest").textContent = open ? "收起推薦" : "不知道問什麼？";
   };

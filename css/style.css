@@ -148,7 +148,7 @@ input { font-family: inherit; }
 }
 
 /* ===== 對話 ===== */
-.log { flex: 1; min-height: 96px; overflow-y: auto; padding: 14px 14px 6px; overscroll-behavior: contain; }
+.log { position: relative; flex: 1; min-height: 80px; overflow-y: auto; padding: 14px 14px 6px; overscroll-behavior: contain; }
 .msg { margin: 10px 0; animation: rise .35s ease-out; }
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
 .msg.su { display: flex; gap: 8px; align-items: flex-start; }
@@ -223,6 +223,12 @@ body.night .msg.note .notecard { background: #3a3a33; }
 .ask { display: flex; gap: 8px; padding: 6px 14px 4px; }
 /* 手機鍵盤彈出（輸入框聚焦）時：收起選項、工具列、導覽列與新手提示，讓對話與輸入框都看得到 */
 body.kb .choices, body.kb .chat-tools, body.kb .tabbar, body.kb .guide { display: none; }
+body.sugg .chat-tools { display: none; }
+@media (max-height: 760px) {
+  .choices { max-height: 30%; }
+  .guide { font-size: .74rem; padding: 6px 10px; margin-top: 6px; }
+  .guide ul { margin: 0 0 2px; }
+}
 /* 矮螢幕（橫向手機等）：壓縮各區塊 */
 @media (max-height: 560px) {
   .topbar { padding: 4px 12px; }

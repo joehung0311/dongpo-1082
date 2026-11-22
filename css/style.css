@@ -47,6 +47,7 @@ input { font-family: inherit; }
   max-width: 480px;
   height: 100vh;
   height: 100dvh;
+  height: var(--app-h, 100dvh); /* 由 visualViewport 計算，手機鍵盤彈出時跟著縮 */
   margin: 0 auto;
   background: var(--paper);
   background-image:
@@ -147,12 +148,13 @@ input { font-family: inherit; }
 }
 
 /* ===== 對話 ===== */
-.log { flex: 1; overflow-y: auto; padding: 14px 14px 6px; scroll-behavior: smooth; }
+.log { flex: 1; min-height: 96px; overflow-y: auto; padding: 14px 14px 6px; overscroll-behavior: contain; }
 .msg { margin: 10px 0; animation: rise .35s ease-out; }
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
 .msg.su { display: flex; gap: 8px; align-items: flex-start; }
 .msg.su .avatar { width: 32px; height: 32px; font-size: .9rem; border-radius: 6px; }
 .bubble {
+  overflow-wrap: anywhere;
   background: var(--card); border: 1px solid var(--line); border-radius: 4px var(--radius) var(--radius) var(--radius);
   padding: 9px 12px; line-height: 1.75; box-shadow: var(--shadow); max-width: 82%; position: relative;
 }
@@ -194,7 +196,7 @@ body.night .msg.note .notecard { background: #3a3a33; }
 .typing .dots span:nth-child(3) { animation-delay: .4s; }
 @keyframes blink { 50% { opacity: .2; } }
 
-.choices { display: flex; flex-direction: column; gap: 8px; padding: 0 14px; }
+.choices { display: flex; flex-direction: column; gap: 8px; padding: 0 14px; max-height: 38%; overflow-y: auto; flex: none; }
 .choices:not(:empty) { padding-top: 8px; padding-bottom: 4px; }
 .choice {
   text-align: left; border: 1.5px solid var(--cinnabar); background: var(--card); color: var(--ink);
@@ -204,13 +206,45 @@ body.night .msg.note .notecard { background: #3a3a33; }
 .choice .hint { display: block; font-size: .72rem; color: var(--muted); }
 .choices .label { font-size: .78rem; color: var(--cinnabar); text-align: center; }
 
-.ask { display: flex; gap: 8px; padding: 8px 14px 4px; }
+.ask-wrap { flex: none; border-top: 1px dashed var(--line); margin-top: 6px; }
+.ask-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 14px 0; font-size: .76rem; color: var(--muted); }
+.ask-head b { color: var(--jade); }
+.link { border: 0; background: none; color: var(--cinnabar); font-size: .78rem; text-decoration: underline; padding: 2px 0; flex: none; }
+.suggest { display: flex; gap: 6px; overflow-x: auto; padding: 6px 14px 0; scrollbar-width: none; }
+.suggest[hidden] { display: none; }
+.suggest .chip { flex: none; color: var(--ink); border-color: var(--jade); }
+.guide {
+  flex: none; margin: 8px 12px 0; padding: 8px 12px; border: 1px solid var(--jade); border-radius: 12px;
+  background: var(--jade-soft); font-size: .8rem; line-height: 1.6; position: relative;
+}
+.guide[hidden] { display: none; }
+.guide ul { margin: 2px 0 4px; padding-left: 1.1em; }
+.guide .hl { color: var(--cinnabar); font-weight: 700; }
+.ask { display: flex; gap: 8px; padding: 6px 14px 4px; }
+/* 手機鍵盤彈出（輸入框聚焦）時：收起選項、工具列、導覽列與新手提示，讓對話與輸入框都看得到 */
+body.kb .choices, body.kb .chat-tools, body.kb .tabbar, body.kb .guide { display: none; }
+/* 矮螢幕（橫向手機等）：壓縮各區塊 */
+@media (max-height: 560px) {
+  .topbar { padding: 4px 12px; }
+  .topbar .avatar { width: 30px; height: 30px; font-size: .9rem; }
+  .choices { max-height: 30%; }
+  .choice { padding: 6px 12px; font-size: .9rem; }
+  .log { min-height: 72px; }
+  .ask-head { padding-top: 3px; }
+  .ask { padding-top: 3px; padding-bottom: 2px; }
+  .ask input { padding: 6px 12px; }
+  .chat-tools { padding: 0 10px 3px; }
+  .chat-tools .chip { padding: 2px 10px; }
+  .tabbar button { flex-direction: row; justify-content: center; padding: 5px 0; }
+  .tabbar button span { font-size: .95rem; }
+  .guide { display: none; }
+}
 .ask input {
   flex: 1; min-width: 0; border: 1.5px solid var(--line); background: var(--card); color: var(--ink);
   border-radius: 999px; padding: 9px 14px; font-size: 16px;
 }
 .ask input:focus { outline: none; border-color: var(--jade); }
-.chat-tools { display: flex; gap: 6px; justify-content: center; padding: 2px 10px 8px; flex-wrap: wrap; }
+.chat-tools { display: flex; gap: 6px; justify-content: center; padding: 2px 10px 8px; flex-wrap: wrap; flex: none; }
 
 /* 結局卡 */
 .ending-card {
@@ -325,8 +359,8 @@ details.fact p { font-size: .88rem; line-height: 1.8; }
 .modal-card h3 { margin-top: 0; }
 .kw-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
 
-@media (min-width: 520px) {
-  #app { height: calc(100vh - 32px); margin-top: 16px; border-radius: 20px; }
+@media (min-width: 520px) and (min-height: 600px) {
+  #app { height: calc(var(--app-h, 100vh) - 32px); margin-top: 16px; border-radius: 20px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }

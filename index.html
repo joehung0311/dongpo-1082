@@ -24,7 +24,7 @@
       <p class="lead">一卷《寒食帖》的墨跡暈開，<br>你醒來時，身在九百多年前的長江邊。</p>
       <button id="btnStart" class="btn primary big">穿越黃州</button>
       <button id="btnContinue" class="btn ghost" hidden>繼續上次的旅程</button>
-      <p class="disclaimer">本作對話皆為<strong>預先寫好的劇本</strong>與<strong>關鍵字固定回覆</strong>，並非生成式 AI。<br>訊息標「史」者有原文或史料依據，標「創」者為虛構創作。</p>
+      <p class="disclaimer">本遊戲由 Claude Code 協助開發；遊玩過程不串接生成式 AI，人物對話採用預寫劇本與關鍵字回覆。<br>訊息標「史」者有原文或史料依據，標「創」者為虛構創作。</p>
     </div>
   </section>
 
@@ -46,15 +46,31 @@
 
     <!-- 對話 -->
     <div id="tab-chat" class="tab active">
+      <div id="guide" class="guide" hidden>
+        <b>玩法速覽</b>
+        <ul>
+          <li>點<span class="hl">紅框選項</span>推進故事；選擇會改變右上角的<span class="hl">知己值、樂觀值</span>，決定四種結局。</li>
+          <li><span class="hl">問問東坡</span>（下方輸入框）是額外聊天，不影響劇情數值。</li>
+          <li>底部的<span class="hl">廚房、拾句、行囊</span>是另外的小遊戲與收藏。</li>
+        </ul>
+        <button id="btnGuideOk" class="chip" type="button">知道了</button>
+      </div>
       <div id="log" class="log" aria-live="polite"></div>
       <div id="choices" class="choices"></div>
-      <form id="askForm" class="ask" autocomplete="off">
-        <input id="askInput" type="text" maxlength="40" placeholder="自由提問（關鍵字應答・非 AI）" aria-label="自由提問">
-        <button class="btn primary" type="submit">問</button>
-      </form>
+      <div class="ask-wrap">
+        <div class="ask-head">
+          <span><b>問問東坡</b>・預寫劇本互動，非即時 AI。</span>
+          <button id="btnSuggest" class="link" type="button" aria-expanded="false" aria-controls="suggest">不知道問什麼？</button>
+        </div>
+        <div id="suggest" class="suggest" hidden></div>
+        <form id="askForm" class="ask" autocomplete="off">
+          <input id="askInput" type="text" maxlength="40" enterkeyhint="send" placeholder="問問東坡……" aria-label="問問東坡">
+          <button class="btn primary" type="submit">問</button>
+        </form>
+      </div>
       <div class="chat-tools">
         <button id="btnSpeed" class="chip" type="button">速度：一般</button>
-        <button id="btnKeys" class="chip" type="button">可以問什麼？</button>
+        <button id="btnKeys" class="chip" type="button">關鍵字一覽</button>
         <button id="btnRestart" class="chip" type="button">重新穿越</button>
       </div>
     </div>
@@ -63,7 +79,7 @@
     <div id="tab-kitchen" class="tab">
       <div class="panel">
         <h2>東坡廚房</h2>
-        <p class="muted">照〈豬肉頌〉的祕訣燉一鍋肉。蘇軾說：「待他自熟莫催他。」</p>
+        <p class="muted">照〈豬肉頌〉的祕訣燉一鍋肉。蘇軾說：「待他自熟莫催他。」<br>燉煮中離開廚房（切到別的功能或瀏覽器分頁）會自動封火暫停，回來按「繼續燉」即可。</p>
         <div id="kitchenLock" class="lock" hidden>
           <p>🔒 劇情第二章會解鎖這裡。</p>
           <button id="btnSneak" class="btn ghost">偷偷先進廚房</button>
@@ -86,7 +102,7 @@
         <details class="fact">
           <summary>史實小箋：〈豬肉頌〉與「東坡肉」</summary>
           <p>「淨洗鐺，少著水，柴頭罨煙焰不起。待他自熟莫催他，火候足時他自美。黃州好豬肉，價賤如泥土。貴者不肯吃，貧者不解煮。早晨起來打兩碗，飽得自家君莫管。」</p>
-          <p>〈豬肉頌〉一般繫於蘇軾黃州時期（各版本文字略有出入）。今日杭州名菜「東坡肉」的命名與許多相關故事，屬後世流傳的傳說，未必能直接追溯到蘇軾本人。本遊戲的評分方式為虛構設計。</p>
+          <p>〈豬肉頌〉一般繫於蘇軾黃州時期，確切寫作年份不詳（各版本文字略有出入）。今日杭州名菜「東坡肉」的命名與許多相關故事，屬後世流傳的傳說，未必能直接追溯到蘇軾本人。本遊戲的評分方式為虛構設計。</p>
         </details>
       </div>
     </div>
@@ -125,7 +141,7 @@
         <h3>怎麼玩</h3>
         <ul class="list">
           <li><b>對話</b>：跟著劇情點選回應，你的選擇會改變「知己值」「樂觀值」，走向四種不同結局。</li>
-          <li><b>自由提問</b>：在對話頁下方輸入問題，系統會比對關鍵字，給出事先寫好的回覆。</li>
+          <li><b>問問東坡</b>：在對話頁下方輸入問題（或點「不知道問什麼？」的推薦問題），系統比對關鍵字，給出事先寫好的回覆。這是額外聊天，不影響劇情數值。</li>
           <li><b>廚房</b>：依〈豬肉頌〉的祕訣燉東坡肉，抓準火候。</li>
           <li><b>拾句</b>：蘇軾名句填空小測驗。</li>
           <li><b>行囊</b>：收集結局與印章，每天抽一支東坡籤。</li>
@@ -134,7 +150,7 @@
         <p><span class="tag shi">史</span> 引自蘇軾原文，或有史料依據，點開可看出處。</p>
         <p><span class="tag chuang">創</span> 本作虛構的對白與情節（若化用原文會註明）。</p>
         <p><span class="tag note">箋</span> 「史實小箋」卡片，補充真實的歷史背景。</p>
-        <p class="warn">誠實聲明：本作<strong>沒有使用任何生成式 AI</strong>。蘇軾的每句話都是作者事先寫好的；自由提問只是關鍵字比對，問不到的話他會老實說聽不懂。</p>
+        <p class="warn"><strong>AI 透明聲明：</strong>本遊戲由 Claude Code 協助開發；遊玩過程不串接生成式 AI，人物對話採用預寫劇本與關鍵字回覆。「問問東坡」只是關鍵字比對，問不到的話他會老實說聽不懂。</p>
         <h3>蘇軾生平簡表</h3>
         <ol id="timeline" class="timeline"></ol>
         <h3>主要參考</h3>

@@ -31,7 +31,7 @@
     return {
       node: null, logStart: 0, snap: null, lastEnding: null,
       bond: 0, joy: 0, flags: {}, log: [],
-      seals: {}, endings: {}, kitchen: false, kitchenSeen: false,
+      seals: {}, endings: {}, kitchen: false, kitchenSeen: false, seenGuide: false,
       chatCount: 0, spoilers: [], speed: 1,
       kBest: null, qBest: null, fortuneDay: null, fortuneIdx: null
     };
@@ -57,8 +57,18 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => t.classList.remove("show"), 2400);
   }
+  // 彈窗：任何關閉方式（按鈕、背景、Esc、開新彈窗）都一定會 resolve，不留下等待狀態
+  let modalResolve = null;
+  function closeModal(v) {
+    $("#modal").hidden = true;
+    const r = modalResolve;
+    modalResolve = null;
+    if (r) r(v);
+  }
   function modal(title, bodyNodes, buttons) {
+    if (modalResolve) closeModal(null);
     return new Promise((resolve) => {
+      modalResolve = resolve;
       const m = $("#modal"), c = $("#modalCard");
       c.innerHTML = "";
       c.appendChild(el("h3", null, title));
@@ -67,14 +77,16 @@
       const row = el("div", "row");
       buttons.forEach((b) => {
         const btn = el("button", "btn " + (b.cls || "ghost"), b.t);
-        btn.onclick = () => { m.hidden = true; resolve(b.v); };
+        btn.type = "button";
+        btn.onclick = () => closeModal(b.v);
         row.appendChild(btn);
       });
       c.appendChild(row);
       m.hidden = false;
     });
   }
-  $("#modal").addEventListener("click", (e) => { if (e.target.id === "modal") $("#modal").hidden = true; });
+  $("#modal").addEventListener("click", (e) => { if (e.target.id === "modal") closeModal(null); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && modalResolve) closeModal(null); });
 
   /* ---------- 印章 ---------- */
   function grantSeal(id) {
@@ -94,7 +106,11 @@
   let playToken = 0;
   let skipWait = null;
 
-  function scrollDown() { logEl.scrollTop = logEl.scrollHeight; }
+  function scrollDown() {
+    logEl.scrollTop = logEl.scrollHeight;
+    // 版面在下一格才定案（例如鍵盤彈出、選項出現），再捲一次確保最新訊息可見
+    requestAnimationFrame(() => { logEl.scrollTop = logEl.scrollHeight; });
+  }
 
   function renderMsg(m) {
     let node;
@@ -141,6 +157,10 @@
     if (n) logEl.appendChild(n);
     if (record) { S.log.push(m); save(); }
     scrollDown();
+    // 不在對話分頁時收到東坡的話，在「對話」分頁加紅點
+    if (m.w === "su" && !$("#tab-chat").classList.contains("active")) {
+      document.querySelector('[data-tab="chat"]').classList.add("dot");
+    }
   }
 
   function delayFor(m) {
@@ -172,8 +192,14 @@
   // 點對話區可跳過等待
   logEl.addEventListener("click", () => { if (skipWait) skipWait(); });
 
+  // 「問問東坡」正在回答時，主線劇情先等一下，避免問答被劇情訊息插隊
+  async function waitAsks() {
+    while (askPending > 0) await askChain;
+  }
+
   async function play(list, token) {
     for (const m of list) {
+      await waitAsks();
       if (token !== playToken) return false;
       const d = delayFor(m);
       if (d > 0) {
@@ -181,6 +207,7 @@
         await wait(d);
         hideTyping();
       }
+      await waitAsks();
       if (token !== playToken) return false;
       addMsg(m, true);
     }
@@ -239,6 +266,9 @@
   async function choose(c, token) {
     if (token !== playToken) return;
     choicesEl.innerHTML = "";
+    hideGuide();
+    await waitAsks();
+    if (token !== playToken) return;
     addMsg({ w: "me", t: c.t }, true);
     const bumps = [];
     const parts = [];
@@ -310,8 +340,8 @@
       renderEndingCard(end, false);
       return;
     }
-    // 回到該段落開頭重播，數值還原到該段落開始時
-    S.log = S.log.slice(0, S.logStart);
+    // 回到該段落開頭重播，數值還原到該段落開始時（「問問東坡」的問答保留）
+    S.log = S.log.filter((m, i) => i < S.logStart || m.free);
     if (S.snap) { S.bond = S.snap.bond; S.joy = S.snap.joy; S.flags = Object.assign({}, S.snap.flags); }
     restoreLog();
     updateMeters();
@@ -325,6 +355,7 @@
       if (!ok) return;
     }
     playToken++;
+    cancelAsks();
     hideTyping();
     S.node = null; S.bond = 0; S.joy = 0; S.flags = {}; S.log = []; S.lastEnding = null;
     save();
@@ -353,46 +384,144 @@
     return best;
   }
 
-  function ask(text) {
-    text = text.trim();
-    if (!text) return;
-    addMsg({ w: "me", t: text }, true);
-    S.chatCount++;
+  /* 問答佇列：每次提問依序處理（玩家訊息 → 研墨動畫 → 東坡回覆），
+     連續快速發問也不會錯亂、重複或被吞掉；重新開始時作廢未完成的回覆。 */
+  let askChain = Promise.resolve();
+  let askPending = 0;
+  let askGen = 0;
+  let askTypingEl = null;
+  let lastFallback = -1;
+
+  function showAskTyping() {
+    hideAskTyping();
+    hideTyping(); // 劇情的研墨提示先收起，畫面上只留一個
+    askTypingEl = el("div", "typing");
+    askTypingEl.appendChild(el("span", null, "蘇軾正在研墨"));
+    const d = el("span", "dots");
+    d.append(el("span"), el("span"), el("span"));
+    askTypingEl.appendChild(d);
+    logEl.appendChild(askTypingEl);
+    scrollDown();
+  }
+  function hideAskTyping() { if (askTypingEl) { askTypingEl.remove(); askTypingEl = null; } }
+  function cancelAsks() { askGen++; hideAskTyping(); }
+
+  function replyFor(text) {
     const hit = findKeyword(text);
-    let m;
     if (hit) {
-      m = { w: "su", t: pick(hit.r), tag: hit.tag, src: hit.src, kw: true };
       if (hit.spoiler) {
         const key = hit.k[0];
         if (!S.spoilers.includes(key)) S.spoilers.push(key);
         if (S.spoilers.length >= 3) grantSeal("spoiler");
       }
-    } else {
-      m = { w: "su", t: pick(FALLBACK), tag: "創", kw: true };
+      return { w: "su", t: pick(hit.r), tag: hit.tag, src: hit.src, kw: true, free: true };
     }
+    // 備援回答輪流出現，避免連續兩次一模一樣
+    let i = Math.floor(Math.random() * FALLBACK.length);
+    if (FALLBACK.length > 1 && i === lastFallback) i = (i + 1) % FALLBACK.length;
+    lastFallback = i;
+    return { w: "su", t: FALLBACK[i], tag: "創", kw: true, free: true,
+      src: "沒有對應的關鍵字，這是預寫的備援回答" };
+  }
+
+  async function handleAsk(text, gen) {
+    if (gen !== askGen) return;
+    addMsg({ w: "me", t: text, free: true }, true);
+    S.chatCount++;
+    const m = replyFor(text);
     save();
     if (S.chatCount >= 10) grantSeal("chatter");
-    showTyping(true);
-    setTimeout(() => { hideTyping(); addMsg(m, true); }, S.speed === 0 ? 150 : 650);
+    showAskTyping();
+    await new Promise((r) => setTimeout(r, S.speed === 0 ? 120 : 600));
+    hideAskTyping();
+    if (gen !== askGen) return;
+    addMsg(m, true);
+  }
+
+  function ask(text) {
+    text = String(text || "").trim();
+    if (!text) return false;
+    const gen = askGen;
+    askPending++;
+    askChain = askChain
+      .then(() => handleAsk(text, gen))
+      .catch((e) => { console.error(e); hideAskTyping(); })
+      .finally(() => { askPending--; });
+    return true;
   }
 
   $("#askForm").addEventListener("submit", (e) => {
     e.preventDefault();
     const inp = $("#askInput");
-    ask(inp.value);
+    if (!ask(inp.value)) { toast("先輸入想問東坡的話"); return; }
     inp.value = "";
   });
+
+  // 推薦問題
+  const SUGGESTIONS = ["東坡，你為何被貶黃州？", "你最想念誰？", "東坡肉怎麼煮？",
+    "你真的不怕風雨嗎？", "赤壁之夜你想通了什麼？", "你想對未來的人說什麼？"];
+  function renderSuggest() {
+    const box = $("#suggest");
+    box.innerHTML = "";
+    SUGGESTIONS.forEach((q) => {
+      const c = el("button", "chip", q);
+      c.type = "button";
+      c.onclick = () => ask(q);
+      box.appendChild(c);
+    });
+  }
+  $("#btnSuggest").onclick = () => {
+    const open = $("#suggest").hidden;
+    $("#suggest").hidden = !open;
+    $("#btnSuggest").setAttribute("aria-expanded", String(open));
+    $("#btnSuggest").textContent = open ? "收起推薦" : "不知道問什麼？";
+  };
+
+  // 手機鍵盤：輸入時收起選項、工具列與底部導覽，讓對話區與輸入框留在可見範圍
+  let kbTimer = null;
+  $("#askInput").addEventListener("focus", () => {
+    clearTimeout(kbTimer);
+    document.body.classList.add("kb");
+    scrollDown();
+  });
+  $("#askInput").addEventListener("blur", () => {
+    // 延遲移除，避免版面在點「問」按鈕的瞬間位移而點不到
+    kbTimer = setTimeout(() => { document.body.classList.remove("kb"); scrollDown(); }, 250);
+  });
+  function fitViewport() {
+    const vv = window.visualViewport;
+    const h = vv ? vv.height : window.innerHeight;
+    document.documentElement.style.setProperty("--app-h", Math.round(h) + "px");
+    if (vv && vv.offsetTop) window.scrollTo(0, 0);
+    scrollDown();
+  }
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", fitViewport);
+    window.visualViewport.addEventListener("scroll", fitViewport);
+  }
+  window.addEventListener("resize", fitViewport);
+  window.addEventListener("orientationchange", () => setTimeout(fitViewport, 300));
+
+  // 新手提示（不擋畫面、不強制）：第一次進入顯示，點「知道了」或做出第一個選擇後收起
+  function showGuide() { if (!S.seenGuide) $("#guide").hidden = false; }
+  function hideGuide() {
+    if ($("#guide").hidden) return;
+    $("#guide").hidden = true;
+    S.seenGuide = true;
+    save();
+  }
+  $("#btnGuideOk").onclick = hideGuide;
 
   $("#btnKeys").onclick = () => {
     const wrap = el("div", "kw-list");
     KEYWORDS.forEach((k) => {
       const c = el("button", "chip", k.k[0]);
       c.type = "button";
-      c.onclick = () => { $("#modal").hidden = true; ask(k.k[0]); };
+      c.onclick = () => { closeModal(null); ask(k.k[0]); };
       wrap.appendChild(c);
     });
-    modal("可以問東坡什麼？",
-      ["這裡的回答是「看到關鍵字就給出事先寫好的回覆」，不是 AI。點下面的字詞直接發問，或自己輸入句子試試看。有幾個關鍵字藏著「未來」的彩蛋……", wrap],
+    modal("問問東坡：關鍵字一覽",
+      ["預寫劇本互動，非即時 AI：看到關鍵字就給出事先寫好的回覆。點下面的字詞直接發問，或自己輸入句子試試看。有幾個關鍵字藏著「未來」的彩蛋……", wrap],
       [{ t: "關閉", v: null }]);
   };
 
@@ -464,8 +593,8 @@
   }
 
   function kitchenReset() {
-    clearInterval(K.timer); clearInterval(K.lineTimer);
-    Object.assign(K, { water: null, fire: null, peeks: 0, prog: 0 });
+    kitchenStopTimers();
+    Object.assign(K, { water: null, fire: null, peeks: 0, prog: 0, cooking: false, paused: false });
     $("#potWater").style.height = "0";
     $("#potWater").style.background = "";
     $("#steam").classList.remove("on");
@@ -490,12 +619,23 @@
     $("#zone").style.left = f.zone[0] + "%";
     $("#zone").style.width = (f.zone[1] - f.zone[0]) + "%";
     $("#gaugeFill").style.opacity = ".8";
-    $("#kStep").textContent = "第三步：蓋上鍋蓋慢慢燉。火候到了（綠色區間）就起鍋！";
+    $("#kStep").textContent = "第三步：蓋上鍋蓋慢慢燉。火候到了（綠色區間）就起鍋！離開廚房會自動封火暫停。";
+    kitchenRun();
+  }
+  function kitchenCookButtons() {
     kButtons([
       { t: "掀蓋偷看（扣分）", on: kitchenPeek, cls: "ghost" },
       { t: "起鍋！", on: () => kitchenServe(false), cls: "primary" }
     ]);
-    const step = 100 / (f.sec * 10);
+  }
+  function kitchenStopTimers() { clearInterval(K.timer); clearInterval(K.lineTimer); K.timer = K.lineTimer = null; }
+  function kitchenRun() {
+    K.cooking = true;
+    K.paused = false;
+    setFlames(K.fire.flames);
+    kitchenCookButtons();
+    const step = 100 / (K.fire.sec * 10);
+    kitchenStopTimers();
     K.timer = setInterval(() => {
       K.prog += step;
       $("#gaugeFill").style.width = Math.min(K.prog, 100) + "%";
@@ -507,6 +647,19 @@
     }, 100);
     K.lineTimer = setInterval(() => { $("#kStep").textContent = pick(COOK_LINES); }, 2600);
   }
+  // 封火暫停：切換到其他功能分頁、或切走瀏覽器分頁時自動暫停，避免意外燒焦
+  function kitchenPause(reason) {
+    if (!K.cooking || K.paused) return;
+    kitchenStopTimers();
+    K.paused = true;
+    setFlames(0);
+    $("#steam").classList.remove("on");
+    $("#kStep").textContent = reason === "hidden"
+      ? "你離開了一下，東坡幫你把火封住了。鍋裡的肉停在原本的火候。"
+      : "你離開廚房，東坡幫你把火封住了。鍋裡的肉停在原本的火候。";
+    kButtons([{ t: "繼續燉", on: kitchenRun, cls: "primary" }]);
+  }
+  document.addEventListener("visibilitychange", () => { if (document.hidden) kitchenPause("hidden"); });
   function kitchenPeek() {
     K.peeks++;
     $("#lid").classList.add("peek");
@@ -515,7 +668,9 @@
     setTimeout(() => { $("#lid").classList.remove("peek"); }, 1100);
   }
   function kitchenServe(burnt) {
-    clearInterval(K.timer); clearInterval(K.lineTimer);
+    kitchenStopTimers();
+    K.cooking = false;
+    K.paused = false;
     $("#gaugeFill").style.opacity = ".8";
     $("#steam").classList.remove("on");
     setFlames(0);
@@ -726,6 +881,9 @@
       [{ t: "取消", v: false }, { t: "全部清除", v: true, cls: "danger" }]);
     if (!ok) return;
     playToken++;
+    cancelAsks();
+    hideTyping();
+    kitchenStopTimers();
     try { localStorage.removeItem(LS_KEY); } catch (e) { /* 忽略 */ }
     S = defaultState();
     logEl.innerHTML = "";
@@ -750,15 +908,20 @@
     document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.id === "tab-" + name));
     document.querySelectorAll(".tabbar button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
     $("#meters").style.visibility = name === "chat" ? "visible" : "hidden";
+    if (name !== "kitchen") kitchenPause("tab");
     if (name === "kitchen" && S.kitchen && !S.kitchenSeen) { S.kitchenSeen = true; save(); renderKitchenLock(); }
     if (name === "bag") renderBag();
-    if (name === "chat") scrollDown();
+    if (name === "chat") {
+      document.querySelector('[data-tab="chat"]').classList.remove("dot");
+      scrollDown();
+    }
   }
   document.querySelectorAll(".tabbar button").forEach((b) => { b.onclick = () => switchTab(b.dataset.tab); });
 
   function showMain() {
     $("#splash").classList.remove("active");
     $("#main").classList.add("active");
+    showGuide();
   }
   function showSplash() {
     $("#main").classList.remove("active");
@@ -766,9 +929,14 @@
     $("#btnContinue").hidden = !S.node;
   }
 
-  $("#btnStart").onclick = () => {
-    if (S.node) restartStory(false);
-    else { showMain(); switchTab("chat"); runNode("start"); }
+  $("#btnStart").onclick = async () => {
+    if (S.node) {
+      const ok = await modal("開始新的旅程？",
+        "你有一段還沒走完（或已走完）的旅程。開始新旅程會覆蓋目前的劇情進度與知己值；已收集的結局、印章、廚房與拾句成績都會保留。",
+        [{ t: "取消", v: false }, { t: "開始新旅程", v: true, cls: "primary" }]);
+      if (!ok) return;
+      restartStory(false);
+    } else { showMain(); switchTab("chat"); runNode("start"); }
   };
   $("#btnContinue").onclick = continueStory;
 
@@ -799,7 +967,9 @@
     if (S.kBest != null) $("#kBest").textContent = S.kBest + " 分";
     if (S.qBest != null) $("#qBest").textContent = S.qBest + " / 5";
     quizIntro();
+    renderSuggest();
     renderBag();
+    fitViewport();
     showSplash();
   }
   init();
